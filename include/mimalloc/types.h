@@ -107,6 +107,16 @@ terms of the MIT license. A copy of the license can be found in the file
 // #define MI_HUGE_PAGE_ABANDON 1
 
 
+// Define MI_SINGLE_THREADED if the program only ever calls into mimalloc from a
+// single thread. Every block is then known to be thread-local, so the free fast
+// path can skip the per-free ownership test (a thread-id read and an atomic load).
+// This is unsafe if more than one thread allocates or frees; in debug builds the
+// ownership invariant is still asserted to catch such misuse.
+#if !defined(MI_SINGLE_THREADED)
+#define MI_SINGLE_THREADED 0
+#endif
+
+
 // ------------------------------------------------------
 // Platform specific values
 // ------------------------------------------------------

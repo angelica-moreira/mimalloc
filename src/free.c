@@ -153,7 +153,14 @@ static inline void mi_free_ex(void* p, size_t* usable) mi_attr_noexcept
   mi_segment_t* const segment = mi_checked_ptr_segment(p,"mi_free");
   if mi_unlikely(segment==NULL) return;
 
+#if MI_SINGLE_THREADED
+  // single-threaded build: the block is always owned by the calling thread, so we
+  // skip the ownership test on the fast path. Verify the promise in debug mode.
+  mi_assert_internal(_mi_prim_thread_id() == mi_atomic_load_relaxed(&segment->thread_id));
+  const bool is_local = true;
+#else
   const bool is_local = (_mi_prim_thread_id() == mi_atomic_load_relaxed(&segment->thread_id));
+#endif
   mi_page_t* const page = _mi_segment_page_of(segment, p);
   if (usable!=NULL) { *usable = mi_page_usable_block_size(page); }
   
