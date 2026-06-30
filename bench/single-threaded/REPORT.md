@@ -115,12 +115,13 @@ uses a single free-block list. mimalloc instead splits `free` (malloc pops) from
 consequence (`microbench/reuse.c`): a freed block is **not** reused on the next
 allocation — it stays in `local_free` until a migration, so it goes cold.
 
-On the `single-threaded-sota` branch, under `MI_SINGLE_THREADED` the free path
-pushes directly onto `page->free` (clearing `free_is_zero` for calloc
-correctness):
+On the `single-threaded-sota` branch, under the opt-in `MI_ST_SINGLE_FREELIST`
+flag (which requires `MI_SINGLE_THREADED`; build with
+`-DMI_SINGLE_THREADED=ON -DMI_ST_SINGLE_FREELIST=ON`) the free path pushes
+directly onto `page->free` (clearing `free_is_zero` for calloc correctness):
 
 ```c
-#if MI_SINGLE_THREADED
+#if MI_ST_SINGLE_FREELIST
   mi_block_set_next(page, block, page->free);
   page->free = block;
   page->free_is_zero = false;

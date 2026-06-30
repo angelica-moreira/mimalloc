@@ -116,6 +116,18 @@ terms of the MIT license. A copy of the license can be found in the file
 #define MI_SINGLE_THREADED 0
 #endif
 
+// MI_ST_SINGLE_FREELIST is a REJECTED EXPERIMENT (see bench/single-threaded/REPORT.md).
+// It merges the `local_free`/`free` lists so that a just-freed block is reused
+// immediately. It requires MI_SINGLE_THREADED and regresses performance on mimalloc
+// (it serializes the alloc/free chain), so it is off by default and kept only to
+// make the negative result reproducible.
+#if !defined(MI_ST_SINGLE_FREELIST)
+#define MI_ST_SINGLE_FREELIST 0
+#endif
+#if MI_ST_SINGLE_FREELIST && !MI_SINGLE_THREADED
+#error "MI_ST_SINGLE_FREELIST requires MI_SINGLE_THREADED"
+#endif
+
 
 // ------------------------------------------------------
 // Platform specific values

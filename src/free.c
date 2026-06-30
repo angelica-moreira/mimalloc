@@ -41,8 +41,20 @@ static inline void mi_free_block_local(mi_page_t* page, mi_block_t* block, bool 
   if (track_stats) { mi_track_free_size(block, mi_page_usable_size_of(page, block, was_guarded)); } // faster then mi_usable_size as we already know the page and that p is unaligned
 
   // actual free: push on the local free list
+#if MI_ST_SINGLE_FREELIST
+  // REJECTED EXPERIMENT (see bench/single-threaded/REPORT.md sec.4). Single free
+  // list (cf. ExGen-Malloc, CAL'25): with only one thread there is no separate
+  // `thread_free` list to reconcile, so push directly onto the page free list so
+  // the cache-hot block is reused on the next allocation. This regresses on
+  // mimalloc because it serializes the alloc/free chain the two-list design keeps
+  // decoupled; kept behind its own opt-in flag as a documented negative result.
+  mi_block_set_next(page, block, page->free);
+  page->free = block;
+  page->free_is_zero = false;
+#else
   mi_block_set_next(page, block, page->local_free);
   page->local_free = block;
+#endif
   if mi_unlikely(--page->used == 0) {
     _mi_page_retire(page);
   }
