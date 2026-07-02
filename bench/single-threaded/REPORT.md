@@ -23,7 +23,7 @@ thread-local and that test is redundant. `MI_SINGLE_THREADED` forces
 
 ```c
 #if MI_SINGLE_THREADED
-  mi_assert_internal(_mi_prim_thread_id() == mi_atomic_load_relaxed(&segment->thread_id));
+  mi_assert(_mi_prim_thread_id() == mi_atomic_load_relaxed(&segment->thread_id));
   const bool is_local = true;
 #else
   const bool is_local = (_mi_prim_thread_id() == mi_atomic_load_relaxed(&segment->thread_id));
@@ -39,7 +39,8 @@ default build is byte-identical to baseline.
 
 The flag is a single-thread-only contract. With it on, calling mimalloc from
 more than one thread is undefined. Unlike a bare branch removal, the debug build
-keeps the ownership check as `mi_assert_internal`, so multithreaded misuse aborts
+keeps the ownership check as `mi_assert` (active from `MI_DEBUG>=1`, i.e. any
+debug build including `-DMI_DEBUG=ON`), so multithreaded misuse aborts
 immediately (verified: `test-stress` trips it at `free.c` with SIGABRT) instead
 of silently corrupting the heap. Zero cost in release.
 

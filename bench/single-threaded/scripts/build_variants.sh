@@ -22,7 +22,7 @@ build() { # <name> <extra-cmake-args...>
   echo ">> building '$name' in $d"
   rm -rf "$d"; mkdir -p "$d"
   ( cd "$d" && cmake "$here" -DCMAKE_BUILD_TYPE=Release "$@" >cmake.log 2>&1 \
-      && make -j"$jobs" >make.log 2>&1 )
+      && cmake --build . -j "$jobs" >make.log 2>&1 )
   echo "   -> $(ls "$d"/libmimalloc.so.*.* 2>/dev/null | grep -E '\.[0-9]+$' | head -1)"
 }
 

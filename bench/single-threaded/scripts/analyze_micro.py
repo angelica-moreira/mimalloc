@@ -54,7 +54,9 @@ def main():
         for v in variants:
             xs = d[wl][v].get(metric, [])
             if not xs: continue
-            m = st.median(xs); ipc = st.median(d[wl][v]["instructions"])/m
+            m = st.median(xs)
+            cyc = d[wl][v].get("cycles"); ins = d[wl][v].get("instructions")
+            ipc = (st.median(ins)/st.median(cyc)) if (cyc and ins) else float("nan")
             line = (f"  {v:9s} p50={m:14,.0f}  p90={pct(xs,90):14,.0f}  "
                     f"p99={pct(xs,99):14,.0f}  ipc={ipc:.3f}")
             if v != baseline and bvals:
