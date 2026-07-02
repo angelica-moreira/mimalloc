@@ -155,8 +155,9 @@ static inline void mi_free_ex(void* p, size_t* usable) mi_attr_noexcept
 
 #if MI_SINGLE_THREADED
   // single-threaded build: the block is always owned by the calling thread, so we
-  // skip the ownership test on the fast path. Verify the promise in debug mode.
-  mi_assert_internal(_mi_prim_thread_id() == mi_atomic_load_relaxed(&segment->thread_id));
+  // skip the ownership test on the fast path. Verify the promise in any debug build
+  // (mi_assert is active from MI_DEBUG>=1, unlike mi_assert_internal which needs >1).
+  mi_assert(_mi_prim_thread_id() == mi_atomic_load_relaxed(&segment->thread_id));
   const bool is_local = true;
 #else
   const bool is_local = (_mi_prim_thread_id() == mi_atomic_load_relaxed(&segment->thread_id));

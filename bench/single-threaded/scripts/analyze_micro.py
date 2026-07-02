@@ -34,10 +34,12 @@ def boot_ci(a, b, it=20000):
 
 def main():
     path = sys.argv[1]
-    metric = "cycles"; baseline = "baseline"
+    metric = "cycles"; baseline = "baseline"; seed = 12345
     for i, a in enumerate(sys.argv):
         if a == "--metric": metric = sys.argv[i+1]
         if a == "--baseline": baseline = sys.argv[i+1]
+        if a == "--seed": seed = int(sys.argv[i+1])
+    random.seed(seed)   # deterministic bootstrap CI for reproducible analysis
     d = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
     with open(path) as f:
         for r in csv.DictReader(f):

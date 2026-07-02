@@ -19,7 +19,9 @@ PIN="taskset -c $CORE"
 # (label -> libpath) pairs from argv: lib1 label1 lib2 label2 ...
 libs=(); labels=()
 while [ $# -ge 2 ]; do libs+=("$1"); labels+=("$2"); shift 2; done
+[ $# -eq 0 ] || { echo "error: leftover argument '$1' (need <lib> <label> pairs)"; exit 1; }
 [ ${#libs[@]} -ge 1 ] || { echo "usage: run_micro.sh <lib> <label> [<lib> <label> ...]"; exit 1; }
+for l in "${libs[@]}"; do [ -f "$l" ] || { echo "error: library not found: $l"; exit 1; }; done
 
 bin="$here/../microbench/churn"
 g++ -O2 -o "$bin" "$here/../microbench/churn.cpp"
