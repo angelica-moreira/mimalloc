@@ -771,6 +771,10 @@ static mi_decl_noinline mi_page_t* mi_page_queue_find_free_ex(mi_theap_t* theap,
   long page_full_retain = (pq->block_size > MI_SMALL_MAX_OBJ_SIZE ? 0 : theap->page_full_retain); // only retain small pages
   mi_page_t* page_candidate = NULL;  // a page with free space
   mi_page_t* page = pq->first;
+  // Stop after the page that is the tail when the search starts: retained-but-full
+  // pages are demoted to the back during the scan, so this bounds the walk and
+  // prevents re-visiting pages we just relocated.
+  mi_page_t* const scan_end = pq->last;
 
   while (page != NULL)
   {
@@ -795,6 +799,13 @@ static mi_decl_noinline mi_page_t* mi_page_queue_find_free_ex(mi_theap_t* theap,
       if (page_full_retain < 0) {
         mi_assert_internal(!mi_page_is_in_full(page) && !mi_page_immediate_available(page));
         mi_page_to_full(page, pq);
+      }
+      else if (page != scan_end && pq->last != page) {
+        // still retained, but full: demote it to the back of the queue so it stops
+        // lengthening the hot prefix that every subsequent allocation re-scans. This
+        // keeps the page reusable (no abandon churn) while shortening the average
+        // next-fit walk on contended producer/consumer workloads (e.g. larson).
+        mi_page_queue_move_to_back(theap, pq, page);
       }
     }
     else {
@@ -832,6 +843,11 @@ static mi_decl_noinline mi_page_t* mi_page_queue_find_free_ex(mi_theap_t* theap,
     mi_page_to_full(page, pq);
   #endif
 
+    // stop once we have processed the page that was the tail at search start;
+    // any pages relocated to the back during this scan lie beyond it. Clear `page`
+    // so that, without a candidate, we fall through to the fresh-page path just as
+    // the original NULL-terminated walk did.
+    if (page == scan_end) { page = NULL; break; }
     page = next;
   } // for each page
 

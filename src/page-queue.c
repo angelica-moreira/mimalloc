@@ -341,6 +341,17 @@ static void mi_page_queue_move_to_front(mi_theap_t* theap, mi_page_queue_t* queu
   mi_assert_internal(queue->first == page);
 }
 
+// Move a page to the back of its queue. Used to demote retained-but-full pages so
+// they stop lengthening the hot prefix of the next-fit search in `find_free_ex`.
+static void mi_page_queue_move_to_back(mi_theap_t* theap, mi_page_queue_t* queue, mi_page_t* page) {
+  mi_assert_internal(mi_page_theap(page) == theap);
+  mi_assert_internal(mi_page_queue_contains(queue, page));
+  if (queue->last == page) return;
+  mi_page_queue_remove(queue, page);
+  mi_page_queue_push_at_end(theap, queue, page);
+  mi_assert_internal(queue->last == page);
+}
+
 static void mi_page_queue_enqueue_from_ex(mi_page_queue_t* to, mi_page_queue_t* from, bool enqueue_at_end, mi_page_t* page) {
   mi_assert_internal(page != NULL);
   mi_assert_internal(from->count >= 1);
