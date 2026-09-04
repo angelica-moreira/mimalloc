@@ -57,7 +57,7 @@ static inline void mi_free_block_local(mi_page_t* page, mi_block_t* block, bool 
 }
 
 // Forward declaration for multi-threaded collect
-static void mi_decl_noinline mi_free_try_collect_mt(mi_page_t* page, mi_block_t* mt_free) mi_attr_noexcept;
+static void mi_decl_noinline mi_free_try_collect_mt(mi_page_t* page, mi_block_t* mt_free, bool had_pending) mi_attr_noexcept;
 
 // Free a block multi-threaded
 static inline void mi_free_block_mt(mi_page_t* page, mi_block_t* block, bool was_guarded, bool allow_collect) mi_attr_noexcept
@@ -91,7 +91,10 @@ static inline void mi_free_block_mt(mi_page_t* page, mi_block_t* block, bool was
     const bool is_owned_now = !mi_tf_is_owned(tf_old);
     if (is_owned_now) {
       mi_assert_internal(mi_page_is_abandoned(page));
-      mi_free_try_collect_mt(page,block);
+      // `had_pending` is true when the thread-free list was non-empty before our push,
+      // i.e. earlier cross-thread frees have accumulated without the owner collecting them.
+      const bool had_pending = (mi_tf_block(tf_old) != NULL);
+      mi_free_try_collect_mt(page, block, had_pending);
     }
   }
 }
@@ -483,13 +486,47 @@ static mi_decl_noinline bool mi_abandoned_page_try_reclaim(mi_page_t* page, long
 
 
 // We freed a block in an abandoned page (that was not owned). Try to collect
-static void mi_decl_noinline mi_free_try_collect_mt(mi_page_t* page, mi_block_t* mt_free) mi_attr_noexcept
+static void mi_decl_noinline mi_free_try_collect_mt(mi_page_t* page, mi_block_t* mt_free, bool had_pending) mi_attr_noexcept
 {
   mi_assert_internal(mi_page_is_owned(page));
   mi_assert_internal(mi_page_is_abandoned(page));
   mi_assert_internal(mt_free != NULL);
   // mi_assert_internal(_mi_subproc() == mi_page_subproc(page));  // never collect across subprocesses
-  
+
+  // Defer collecting for a foreign thread that frees into a full abandoned page,
+  // unless cross-thread frees have already started to accumulate (`had_pending`).
+  // A thread that did not originate the page will not reclaim it (cross-thread
+  // reclaim-on-free is off by default), so collecting here only writes
+  // `free`/`used`/`local_free` on the page's first cache line -- the same line the
+  // originating thread reads on every fast-path free -- creating owner<->freer
+  // coherence traffic. When no prior free is pending, dropping ownership and leaving
+  // the block on `xthread_free` avoids that write; reconciling as soon as a second
+  // free is pending bounds the uncollected list to O(1), so emptied pages are still
+  // detected and returned. Conditions:
+  //  - `used > 1`: an abandoned page has an up-to-date `used` (it is collected before
+  //    abandoning), so keeping more than one block accounted guarantees this single
+  //    deferred free cannot empty the page and strand it.
+  //  - `mi_page_is_full`: this targets exactly the full-abandoned page that dev3's
+  //    protocol leaves unmapped; a non-full page is already findable and collecting
+  //    it is cheap.
+  //  - block size `<= MI_SMALL_MAX_OBJ_SIZE`: only small-object pages benefit from the
+  //    abandoned-page reclaim path. Deferring a large object instead delays freeing a
+  //    big allocation, which hurts throughput and footprint, so collect those eagerly.
+  if (!had_pending && page->used > 1 && mi_page_is_full(page) &&
+      mi_page_block_size(page) <= MI_SMALL_MAX_OBJ_SIZE &&
+      _mi_page_associated_theap_peek(page) != page->theap) {
+    // Keep the just-freed block reusable without touching the first cache line: if
+    // this page was abandoned while full it is unmapped and unfindable, so publish it
+    // into the abandoned map. The block stays on `xthread_free` and is collected by
+    // whichever thread reclaims the page for allocation. This preserves prompt reuse
+    // (no resident-set growth) while still avoiding the owner<->freer coherence write.
+    if (!mi_page_is_abandoned_mapped(page)) {
+      _mi_arenas_page_publish_abandoned_mapped(page);
+    }
+    mi_abandoned_page_unown_from_free(page, mt_free);
+    return;
+  }
+
   // we own the page now, and it is safe to collect the thread atomic free list
   if (page->block_size <= MI_SMALL_SIZE_MAX) {
     // use the `_partly` version to avoid atomic operations since we already have the `mt_free` pointing into the thread free list
