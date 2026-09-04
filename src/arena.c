@@ -1390,6 +1390,43 @@ bool _mi_arenas_page_try_reabandon_to_mapped(mi_page_t* page) {
   }
 }
 
+// Publish a page that was abandoned while full (and therefore left unmapped and
+// unfindable) into the per-bin abandoned map, so an allocating thread can find and
+// reclaim it. This is called from `free.c` for a cross-thread free that defers the
+// collect: unlike `_mi_arenas_page_abandon` it does not touch the page's
+// `used`/`free`/`local_free` (first cache line) and does not release ownership -- the
+// freed block stays on `xthread_free` and is collected by whichever thread reclaims
+// the page. The caller must still release ownership afterwards. Returns `true` if the
+// page was mapped. Availability is decided from `xthread_free` (second cache line) so
+// no owner<->freer coherence traffic is created on the hot first cache line.
+bool _mi_arenas_page_publish_abandoned_mapped(mi_page_t* page) {
+  mi_assert_internal(mi_page_is_owned(page));
+  mi_assert_internal(mi_page_is_abandoned(page));
+  mi_assert_internal(!mi_page_is_abandoned_mapped(page));
+  if (page->memid.memkind != MI_MEM_ARENA || mi_page_is_singleton(page)) return false;
+  if (!mi_page_has_any_available(page)) return false;  // truly full: nothing to publish
+  const size_t bin = _mi_bin(mi_page_block_size(page));
+  if (bin >= MI_ARENA_BIN_COUNT) return false;         // paranoia
+
+  size_t slice_index;
+  size_t slice_count;
+  mi_arena_pages_t* arena_pages = NULL;
+  mi_arena_t* const arena = mi_page_arena_pages(page, &slice_index, &slice_count, &arena_pages); MI_UNUSED(arena);
+
+  mi_assert_internal(mi_bbitmap_is_clearN(arena->slices_free, slice_index, slice_count));
+  mi_assert_internal(mi_page_slice_committed(page) > 0 || mi_bitmap_is_setN(arena->slices_committed, slice_index, slice_count));
+  mi_assert_internal(mi_bitmap_is_setN(arena->slices_dirty, slice_index, slice_count));
+
+  mi_heap_t* const heap = mi_page_heap(page);
+  mi_theap_t* const theapx = _mi_page_associated_theap_peek(page);
+  mi_page_set_abandoned_mapped(page);
+  const bool was_clear = mi_bitmap_set(arena_pages->pages_abandoned[bin], slice_index);
+  MI_UNUSED(was_clear); mi_assert_internal(was_clear);
+  mi_atomic_increment_relaxed(&heap->abandoned_count[bin]);
+  mi_theapx_stat_counter_increase(heap, theapx, pages_reabandon_full, 1);
+  return true;
+}
+
 // called from `mi_free` if trying to unabandon an abandoned page
 void _mi_arenas_page_unabandon(mi_page_t* page, mi_theap_t* current_theapx) {
   mi_assert_internal(_mi_is_aligned(mi_page_slice_start(page), MI_PAGE_ALIGN));
@@ -2458,6 +2495,10 @@ typedef struct mi_heap_visit_info_s {
 
 static bool mi_heap_visit_page(mi_page_t* page, mi_heap_visit_info_t* vinfo) {
   mi_heap_area_t area;
+  // collect first so `area.used` reflects pending cross-thread frees: an abandoned page
+  // can be published into the bitmap with a block still on `xthread_free` and a stale `used`
+  // (safe here since visitation assumes we are the only thread running with this heap).
+  _mi_page_free_collect(page, true);
   _mi_heap_area_init(&area, page);
   mi_assert_internal(vinfo->heap == mi_page_heap(page));
   if (!vinfo->visitor(vinfo->heap, &area, NULL, area.block_size, vinfo->arg)) {
